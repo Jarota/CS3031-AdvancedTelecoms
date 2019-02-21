@@ -1,15 +1,20 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"io"
 	"log"
 	"net"
 	"net/http"
+	"os"
 	"regexp"
+	"strings"
 )
 
 var hasPort = regexp.MustCompile(`:\d+$`)
+var buffer [256]string
+var blockedHosts []string = buffer[0:0]
 
 func removeProxyHeaders(r *http.Request) {
 	r.RequestURI = ""
@@ -37,13 +42,24 @@ func copyAndClose(dst, src *net.TCPConn, host string) {
 }
 
 func handleHTTP(w http.ResponseWriter, req *http.Request) {
-	client := &http.Client{}
 	fmt.Printf("Rquest received: %s %s\n", req.Method, req.URL)
 	removeProxyHeaders(req)
+
+	//Check the host is not blacklisted
+	for i := range blockedHosts {
+		h := blockedHosts[i]
+		if strings.Contains(req.URL.Host, h) {
+			fmt.Printf("%s is currently blacklisted, refusing request.\n", h)
+			w.Write([]byte("HTTP/1.0 403 FORBIDDEN\r\n\r\n"))
+			req.Body.Close()
+			return
+		}
+	}
 
 	if req.Method == "CONNECT" {
 		handleHTTPS(w, req)
 	} else {
+		client := &http.Client{}
 		res, err := client.Do(req)
 		if err != nil {
 			log.Fatal(err)
@@ -92,9 +108,32 @@ func handleHTTPS(w http.ResponseWriter, req *http.Request) {
 	}
 }
 
+func readConsoleInput() {
+	scanner := bufio.NewScanner(os.Stdin)
+	for scanner.Scan() {
+		input := scanner.Text()
+		host := input[3:]
+		if strings.Contains(input, "/b") {
+			//command to block URL or host etc
+			blockedHosts = append(blockedHosts, host)
+		} else if strings.Contains(input, "/u") {
+			//command to unblock URL or host etc
+			for i, h := range blockedHosts {
+				if strings.Contains(host, h) {
+					blockedHosts = append(blockedHosts[:i], blockedHosts[i+1:]...)
+					break
+				}
+			}
+		}
+	}
+}
+
 func main() {
 	httpHandler := http.HandlerFunc(handleHTTP)
 	fmt.Printf("Proxy activated!\n\n")
+
+	go readConsoleInput()
+
 	http.ListenAndServe(":8080", httpHandler)
 
 }
