@@ -21,15 +21,10 @@ func removeProxyHeaders(r *http.Request) {
 	r.Header.Del("Proxy-Connection")
 	r.Header.Del("Proxy-Authenticate")
 	r.Header.Del("Proxy-Authorization")
-	// Connection, Authenticate and Authorization are single hop Header:
-	// http://www.w3.org/Protocols/rfc2616/rfc2616.txt
-	// 14.10 Connection
-	//   The Connection general-header field allows the sender to specify
-	//   options that are desired for that particular connection and MUST NOT
-	//   be communicated by proxies over further connections.
 	r.Header.Del("Connection")
 }
 
+//copies data from src to dst and then closes relevant halves of both connections
 func copyAndClose(dst, src *net.TCPConn, host string) {
 	if _, err := io.Copy(dst, src); err != nil {
 		fmt.Printf("Error copying to client: %s", err)
@@ -43,7 +38,6 @@ func copyAndClose(dst, src *net.TCPConn, host string) {
 
 func handleHTTP(w http.ResponseWriter, req *http.Request) {
 	fmt.Printf("Rquest received: %s %s\n", req.Method, req.URL)
-	removeProxyHeaders(req)
 
 	//Check the host is not blacklisted
 	for i := range blockedHosts {
@@ -56,50 +50,52 @@ func handleHTTP(w http.ResponseWriter, req *http.Request) {
 		}
 	}
 
+	removeProxyHeaders(req)
+	//switch to https handler if a CONNECT request is received
 	if req.Method == "CONNECT" {
 		handleHTTPS(w, req)
 	} else {
-		client := &http.Client{}
-		res, err := client.Do(req)
+		c := &http.Client{}
+		res, err := c.Do(req) //forward request
 		if err != nil {
 			log.Fatal(err)
 		}
 
 		fmt.Printf("Response received: %s\n\n", res.Status)
-		res.Write(w)
+		res.Write(w) //relay response to client
 
+		//Go requires the bodies to be closed
 		req.Body.Close()
 		res.Body.Close()
 	}
 }
 
 func handleHTTPS(w http.ResponseWriter, req *http.Request) {
-
+	//set the scheme to avoid "unsupported protocol scheme" errors
 	req.URL.Scheme = "https"
 
 	hij, ok := w.(http.Hijacker)
 	if !ok {
 		panic("httpserver does not support hijacking")
 	}
-
-	proxyClient, _, err := hij.Hijack()
+	proxyClient, _, err := hij.Hijack() //hijack connection
 	if err != nil {
 		panic("Cannot hijack connection " + err.Error())
 	}
-
 	host := req.URL.Host
 	if !hasPort.MatchString(host) {
 		host += ":80"
 	}
 
+	//conect to server
 	targetSiteCon, err := net.Dial("tcp", host)
 	if err != nil {
 		log.Println(err.Error())
 	}
 
 	fmt.Printf("Accepting CONNECT to %s\n", host)
-
 	proxyClient.Write([]byte("HTTP/1.0 200 OK\r\n\r\n"))
+	//get the two tcp connections and stream the data between them
 	targetTCP, targetOK := targetSiteCon.(*net.TCPConn)
 	proxyClientTCP, clientOK := proxyClient.(*net.TCPConn)
 	if targetOK && clientOK {
@@ -113,10 +109,10 @@ func readConsoleInput() {
 	for scanner.Scan() {
 		input := scanner.Text()
 		host := input[3:]
-		if strings.Contains(input, "/b") {
+		if input[0:3] == "/b" {
 			//command to block URL or host etc
 			blockedHosts = append(blockedHosts, host)
-		} else if strings.Contains(input, "/u") {
+		} else if input[0:3] == "/u" {
 			//command to unblock URL or host etc
 			for i, h := range blockedHosts {
 				if strings.Contains(host, h) {
@@ -133,7 +129,7 @@ func main() {
 	fmt.Printf("Proxy activated!\n\n")
 
 	go readConsoleInput()
-
+	//listen for and serve requests on port 8080
+	//and use 'httpHandler' to handle them
 	http.ListenAndServe(":8080", httpHandler)
-
 }
