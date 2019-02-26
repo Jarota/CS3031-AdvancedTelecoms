@@ -108,11 +108,11 @@ func readConsoleInput() {
 	for scanner.Scan() {
 		input := scanner.Text()
 		host := input[3:]
-		if input[0:2] == "/b" {
+		if input[0:3] == "/b " {
 			//command to block URL or host etc
 			blockedHosts = append(blockedHosts, host)
 			fmt.Printf("Blocked %s\n", host)
-		} else if input[0:2] == "/u" {
+		} else if input[0:3] == "/u " {
 			//command to unblock URL or host etc
 			for i, h := range blockedHosts {
 				if strings.Contains(host, h) {
