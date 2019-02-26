@@ -40,8 +40,7 @@ func handleHTTP(w http.ResponseWriter, req *http.Request) {
 	fmt.Printf("Rquest received: %s %s\n", req.Method, req.URL)
 
 	//Check the host is not blacklisted
-	for i := range blockedHosts {
-		h := blockedHosts[i]
+	for _, h := range blockedHosts {
 		if strings.Contains(req.URL.Host, h) {
 			fmt.Printf("%s is currently blacklisted, refusing request.\n", h)
 			w.Write([]byte("HTTP/1.0 403 FORBIDDEN\r\n\r\n"))
@@ -109,10 +108,11 @@ func readConsoleInput() {
 	for scanner.Scan() {
 		input := scanner.Text()
 		host := input[3:]
-		if input[0:3] == "/b" {
+		if input[0:2] == "/b" {
 			//command to block URL or host etc
 			blockedHosts = append(blockedHosts, host)
-		} else if input[0:3] == "/u" {
+			fmt.Printf("Blocked %s\n", host)
+		} else if input[0:2] == "/u" {
 			//command to unblock URL or host etc
 			for i, h := range blockedHosts {
 				if strings.Contains(host, h) {
@@ -120,6 +120,7 @@ func readConsoleInput() {
 					break
 				}
 			}
+			fmt.Printf("Unblocked %s\n", host)
 		}
 	}
 }
